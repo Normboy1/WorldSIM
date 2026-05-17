@@ -1,0 +1,155 @@
+{
+  "mesh_convergence": [
+    {
+      "grid": "32x16",
+      "nodes": 512,
+      "T_mean": 854.28,
+      "wall_time_s": 0.139
+    },
+    {
+      "grid": "64x32",
+      "nodes": 2048,
+      "T_mean": 754.701,
+      "wall_time_s": 0.05
+    },
+    {
+      "grid": "128x64",
+      "nodes": 8192,
+      "T_mean": 713.252,
+      "wall_time_s": 0.051
+    },
+    {
+      "grid": "192x96",
+      "nodes": 18432,
+      "T_mean": 717.122,
+      "wall_time_s": 0.051
+    },
+    {
+      "grid": "256x128",
+      "nodes": 32768,
+      "T_mean": 722.446,
+      "wall_time_s": 0.055
+    }
+  ],
+  "fem_validation": [
+    {
+      "fd_backend": "warp_kernel",
+      "fem_backend": "calculix_fem",
+      "fd_T_mean": 798.595947265625,
+      "fem_T_mean": 731.9704711962833,
+      "fd_wall_time_s": 0.11695999000221491,
+      "fem_wall_time_s": 0.03254855400882661,
+      "delta_T_mean": 66.62547606934174,
+      "passes_50C_criterion": false,
+      "config": "3 holes"
+    },
+    {
+      "fd_backend": "warp_kernel",
+      "fem_backend": "calculix_fem",
+      "fd_T_mean": 728.511474609375,
+      "fem_T_mean": 684.4857038327526,
+      "fd_wall_time_s": 0.03423688199836761,
+      "fem_wall_time_s": 0.03222731902496889,
+      "delta_T_mean": 44.02577077662238,
+      "passes_50C_criterion": true,
+      "config": "4 holes asym"
+    },
+    {
+      "fd_backend": "warp_kernel",
+      "fem_backend": "calculix_fem",
+      "fd_T_mean": 683.38720703125,
+      "fem_T_mean": 719.9605155632984,
+      "fd_wall_time_s": 0.032335949974367395,
+      "fem_wall_time_s": 0.03366932101198472,
+      "delta_T_mean": 36.57330853204837,
+      "passes_50C_criterion": true,
+      "config": "6 holes small"
+    },
+    {
+      "fd_backend": "warp_kernel",
+      "fem_backend": "calculix_fem",
+      "fd_T_mean": 887.8226318359375,
+      "fem_T_mean": 641.956137746806,
+      "fd_wall_time_s": 0.03517080200253986,
+      "fem_wall_time_s": 0.03214943400234915,
+      "delta_T_mean": 245.8664940891315,
+      "passes_50C_criterion": false,
+      "config": "3 holes large"
+    },
+    {
+      "fd_backend": "warp_kernel",
+      "fem_backend": "calculix_fem",
+      "fd_T_mean": 999.3375244140625,
+      "fem_T_mean": 651.0690305458769,
+      "fd_wall_time_s": 0.03205357599654235,
+      "fem_wall_time_s": 0.03221203197608702,
+      "delta_T_mean": 348.2684938681856,
+      "passes_50C_criterion": false,
+      "config": "3 holes high"
+    }
+  ],
+  "hole_sweep": [
+    {
+      "n_holes": 0,
+      "T_mean": 1298.51,
+      "time_s": 0.042
+    },
+    {
+      "n_holes": 2,
+      "T_mean": 1228.36,
+      "time_s": 0.042
+    },
+    {
+      "n_holes": 4,
+      "T_mean": 851.64,
+      "time_s": 0.041
+    },
+    {
+      "n_holes": 6,
+      "T_mean": 718.82,
+      "time_s": 0.041
+    },
+    {
+      "n_holes": 8,
+      "T_mean": 714.98,
+      "time_s": 0.042
+    },
+    {
+      "n_holes": 10,
+      "T_mean": 706.49,
+      "time_s": 0.042
+    },
+    {
+      "n_holes": 12,
+      "T_mean": 705.53,
+      "time_s": 0.042
+    }
+  ],
+  "fno_history": {
+    "train_samples": 720,
+    "val_samples": 80,
+    "total_samples": 800,
+    "epochs": 300,
+    "final_val_l2_rel": 0.01185,
+    "final_T_mean_mae_val": 3.05,
+    "architecture": "FNO2d width=48 modes=16 layers=4",
+    "fix_applied": "geometry encoding corrected to use _build_masks_warp (NACA 4412 blade wall cross-section)",
+    "pde_weight": 0.05
+  },
+  "fno_test": {
+    "n_configs": 30,
+    "mean_delta_T_mean": 3.74,
+    "median_delta_T_mean": 2.94,
+    "max_delta_T_mean": 16.34,
+    "pct_under_10C": 97.0,
+    "pct_under_5C": 77.0,
+    "pct_under_3C": 50.0,
+    "note": "Independent holdout seed=999; geometry encoding fix closed train/test gap from 214C to 3.7C"
+  },
+  "summary": {
+    "warp_fd": "Working. NACA 4412 blade wall cross-section, Robin BC holes, 128x64 grid, ~14ms per eval.",
+    "fno_surrogate": "Working. val_L2=0.012, holdout T_mean MAE=3.7C (median 2.9C). 800 samples, 300 epochs.",
+    "calculix_fem": "Working. DC3D8 elements, Dirichlet BCs. 2/5 configs pass 50C criterion (holes at cy<0.35 match best).",
+    "mesh_convergence": "T_mean converges 854->713C from 32x16 to 128x64, slight rise at 192+ (BC interaction)."
+  }
+}

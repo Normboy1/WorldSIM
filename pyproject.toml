@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "worldsim"
+version = "0.2.0"
+description = "WorldSIM: AI-powered scientific simulation platform — math, physics, chemistry, materials, metallurgy, atomic, nuclear, and GPU-accelerated alloy discovery"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MaxOSL AI Research" }]
+
+dependencies = [
+    "sympy>=1.12",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "plotly>=5.17",
+    "pandas>=2.1",
+    "pydantic>=2.0",
+    "fastapi>=0.104",
+    "uvicorn[standard]>=0.24",
+    "mcp>=1.0",
+    "httpx>=0.25",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+chemistry = ["rdkit-pypi"]
+atomic = ["ase"]
+materials = ["pymatgen"]
+control = ["control"]
+physics = ["pybullet"]
+ml = ["torch"]
+nvidia = [
+    "nvalchemi-toolkit-ops",
+    "nvidia-physicsnemo",
+    "warp-lang",
+    "nvidia-cupynumeric",
+    "cuda-python",
+]
+# High-fidelity materials backends
+calphad = ["pycalphad>=0.8.0", "pyyaml>=6.0"]
+dft = ["ase>=3.22.0", "pyyaml>=6.0"]
+mlip = [
+    "mace-torch>=0.3.0",
+    "sevenn>=0.9.0",
+    "ase>=3.22.0",
+    "pyyaml>=6.0",
+]
+high_fidelity = [
+    "pycalphad>=0.8.0",
+    "ase>=3.22.0",
+    "mace-torch>=0.3.0",
+    "sevenn>=0.9.0",
+    "pyyaml>=6.0",
+]
+qd = [
+    "jax>=0.4.0",
+    "optax>=0.1.7",
+    "scipy>=1.11.0",
+]
+dev = ["pytest>=7.4", "pytest-asyncio>=0.21", "httpx>=0.25"]
+all = [
+    "rdkit-pypi", "ase>=3.22.0", "pymatgen", "control", "pybullet", "torch",
+    "pycalphad>=0.8.0", "pyyaml>=6.0",
+]
+
+[project.scripts]
+worldsim-api = "simlab.api.fastapi_server.main:start"
+worldsim-mcp = "simlab.mcp.simlab_mcp_server.server:main"
+worldsim-knowledge-mcp = "simlab.mcp.simlab_knowledge_server.server:main"
+# Legacy aliases
+simlab-api = "simlab.api.fastapi_server.main:start"
+simlab-mcp = "simlab.mcp.simlab_mcp_server.server:main"
+simlab-knowledge-mcp = "simlab.mcp.simlab_knowledge_server.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["simlab"]
+
+[tool.hatch.envs.default]
+dependencies = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.25",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

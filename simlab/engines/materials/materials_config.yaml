@@ -1,0 +1,105 @@
+# WorldSIM Materials Engine Configuration
+# ----------------------------------------
+# Paths and settings for high-fidelity backends.
+# All sections are optional — the system falls back to heuristic proxies
+# when a backend is unavailable or unconfigured.
+
+calphad:
+  # Path to a .tdb thermodynamic database file.
+  # Supported: TCNI9, TCCOB5 (Thermo-Calc), NIST COST-507, custom TDB.
+  # Leave blank to run in proxy mode.
+  database_path: ""
+
+  # Elements to include in multi-component calculations.
+  # Extend as needed — must match elements defined in the TDB file.
+  elements:
+    - Fe
+    - Ni
+    - Cr
+    - Co
+    - Al
+    - Ti
+    - Mo
+    - W
+    - Nb
+    - Ta
+
+  # TCP phases to check. These names must match the phase identifiers in your TDB.
+  tcp_phases:
+    - SIGMA
+    - MU_PHASE
+    - LAVES_C14
+    - LAVES_C15
+    - LAVES_C36
+    - CHI
+    - P_PHASE
+    - R_PHASE
+    - ETA
+
+  # Maximum mole fraction of TCP phases considered acceptable (0–1).
+  # Compositions exceeding this trigger a HIGH risk classification.
+  tcp_risk_threshold: 0.05
+
+dft:
+  # ASE calculator to use: "vasp", "espresso", "cp2k", or "emt" (always available).
+  # "emt" is ASE's built-in empirical tight-binding — useful for testing; not DFT quality.
+  calculator: emt
+
+  # VASP settings (used when calculator = "vasp")
+  vasp:
+    command: vasp_std
+    pseudopotentials: ""       # path to PAW pseudopotential directory
+    encut: 520                 # plane-wave cutoff energy (eV)
+    kpoints: [4, 4, 4]
+    ismear: 1                  # Methfessel-Paxton smearing
+    sigma: 0.2
+    ediff: 1.0e-5              # SCF convergence criterion
+    nsw: 200                   # max ionic steps
+    ibrion: 2                  # conjugate gradient relaxation
+    isif: 2                    # relax ions, fix cell shape
+
+  # Quantum ESPRESSO settings (used when calculator = "espresso")
+  espresso:
+    command: pw.x
+    pseudopotentials: {}       # dict: element -> UPF filename
+    input_data:
+      control:
+        calculation: relax
+        restart_mode: from_scratch
+      system:
+        ecutwfc: 60            # kinetic energy cutoff (Ry)
+        ecutrho: 480
+        occupations: smearing
+        smearing: mv
+        degauss: 0.02
+      electrons:
+        conv_thr: 1.0e-7
+    kpts: [4, 4, 4]
+    koffset: [0, 0, 0]
+
+  # Geometry relaxation convergence
+  convergence:
+    fmax_eV_A: 0.05            # max force component threshold (eV/Å)
+    max_steps: 300
+    optimizer: FIRE            # FIRE recommended for MLIP, BFGS for DFT
+
+mlip:
+  # MACE-MP-0 universal potential model file.
+  # Download from: https://github.com/ACEsuit/mace-mp
+  # Leave blank to skip MACE.
+  mace_model_path: ""
+
+  # SevenNet-0 model checkpoint.
+  # Download from: https://github.com/MDIL-SNU/SevenNet
+  # Leave blank to skip SevenNet.
+  sevennet_model_path: ""
+
+  # Compute device: "cuda" or "cpu"
+  device: cuda
+
+  # Batch screening settings
+  batch:
+    lattice_type: fcc
+    a_angstrom: 3.6            # default lattice parameter (Å)
+    n_atoms: 32                # atoms per supercell
+    seed: 42
