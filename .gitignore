@@ -13,3 +13,4 @@ htmlcov/
 
 .claude/
 /proof/
+data/fno_dataset.npy
