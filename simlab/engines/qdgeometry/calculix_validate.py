@@ -193,12 +193,22 @@ def _parse_dat(dat_path: Path) -> dict[str, Any]:
         return {"error": "no temperatures found in dat output"}
 
     T = np.array(temperatures)
+    # Exclude boundary-pinned nodes (T ≈ T_hot or T ≈ T_cool) from peak metric.
+    # Boundary nodes are Dirichlet-fixed and always return the prescribed value,
+    # so T.max() is always ≈ T_hot and is not a useful optimization objective.
+    # T_interior_peak is the peak temperature over unconstrained interior nodes.
+    T_hot_val  = T.max()
+    T_cool_val = T.min()
+    tol_bc = max(1.0, 0.005 * (T_hot_val - T_cool_val))
+    interior = T[(T < T_hot_val - tol_bc) & (T > T_cool_val + tol_bc)]
+    T_interior_peak = float(interior.max()) if len(interior) > 0 else float(T_hot_val)
     return {
-        "T_mean":  float(T.mean()),
-        "T_peak":  float(T.max()),
-        "T_min":   float(T.min()),
-        "n_nodes": len(T),
-        "T_all":   T,
+        "T_mean":           float(T.mean()),
+        "T_peak":           float(T_hot_val),        # boundary-pinned; ≈ T_hot always
+        "T_interior_peak":  T_interior_peak,          # peak over unconstrained nodes
+        "T_min":            float(T_cool_val),
+        "n_nodes":          len(T),
+        "T_all":            T,
     }
 
 

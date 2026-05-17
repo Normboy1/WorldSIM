@@ -14,3 +14,20 @@ htmlcov/
 .claude/
 /proof/
 data/fno_dataset.npy
+data/*.pt
+data/*.npy
+data/*.json
+
+# CalculiX run artifacts
+*.cvg
+*.dat
+*.sta
+*.frd
+*.inp
+cufile.log
+
+# External DFT calculators (compiled binaries and build artifacts)
+external/
+*.o
+*.mod
+*.x

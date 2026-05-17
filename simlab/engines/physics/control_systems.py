@@ -19,11 +19,20 @@ try:
         step_response, impulse_response, frequency_response,
         bode_plot, nyquist_plot, root_locus_plot,
         feedback, series, parallel,
-        pid, margin, poles, zeros,
+        margin, poles, zeros,
     )
     _CTRL_OK = True
 except ImportError:
     _CTRL_OK = False
+
+
+def _pid(Kp: float, Ki: float, Kd: float) -> "TransferFunction":
+    """Build a PID controller C(s) = Kp + Ki/s + Kd·s as a TransferFunction.
+
+    python-control 0.10+ removed the ``pid`` helper, so construct it directly:
+    C(s) = (Kd·s² + Kp·s + Ki) / s.
+    """
+    return TransferFunction([Kd, Kp, Ki], [1.0, 0.0])
 
 
 def _fig_to_b64(fig: plt.Figure) -> str:
@@ -71,7 +80,7 @@ class ControlSystemsEngine:
     def pid_controller(self, Kp: float, Ki: float, Kd: float) -> dict:
         """Build a PID controller C(s) = Kp + Ki/s + Kd*s."""
         _require_ctrl()
-        C = pid(Kp, Ki, Kd)
+        C = _pid(Kp, Ki, Kd)
         ps = [complex(p) for p in poles(C)]
         return {
             "Kp": Kp, "Ki": Ki, "Kd": Kd,
@@ -195,7 +204,7 @@ class ControlSystemsEngine:
         """Design and analyse a PID-controlled plant."""
         _require_ctrl()
         G = TransferFunction(plant_num, plant_den)
-        C = pid(Kp, Ki, Kd)
+        C = _pid(Kp, Ki, Kd)
         T = feedback(series(C, G))
         analysis = self.closed_loop_analysis(plant_num, plant_den, [Kp], [1])
 

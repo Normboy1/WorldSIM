@@ -18,6 +18,18 @@ import os
 import numpy as np
 import pytest
 
+try:
+    import torch as _torch
+    _CUDA_AVAILABLE = _torch.cuda.is_available()
+except ImportError:
+    _torch = None  # type: ignore
+    _CUDA_AVAILABLE = False
+
+_cuda_skip = pytest.mark.skipif(
+    not _CUDA_AVAILABLE,
+    reason="CUDA device not available — skipping GPU-only test",
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -356,8 +368,9 @@ class TestBladeFNO:
         import torch
         from simlab.engines.qdgeometry.fno_surrogate import encode_geometry
         model, _ = model_and_history
+        device = next(model.parameters()).device
         geom = encode_geometry([0.3, 0.7], [0.3, 0.3], [0.06, 0.06], 64, 128)
-        X = torch.from_numpy(geom).float().unsqueeze(0).cuda()
+        X = torch.from_numpy(geom).float().unsqueeze(0).to(device)
         with torch.no_grad():
             out = model(X)
         assert out.shape == (1, 1, 64, 128), f"Unexpected shape: {out.shape}"
@@ -366,9 +379,10 @@ class TestBladeFNO:
         import torch
         from simlab.engines.qdgeometry.fno_surrogate import encode_geometry
         model, _ = model_and_history
+        device = next(model.parameters()).device
         geom = encode_geometry([0.25, 0.5, 0.75], [0.28, 0.28, 0.28],
                                 [0.05, 0.05, 0.05], 64, 128)
-        X = torch.from_numpy(geom).float().unsqueeze(0).cuda()
+        X = torch.from_numpy(geom).float().unsqueeze(0).to(device)
         with torch.no_grad():
             out = model(X)
         assert not torch.isnan(out).any(), "FNO output contains NaN"
@@ -377,8 +391,9 @@ class TestBladeFNO:
         import torch
         from simlab.engines.qdgeometry.fno_surrogate import encode_geometry
         model, _ = model_and_history
+        device = next(model.parameters()).device
         geom = encode_geometry([0.3], [0.3], [0.05], 64, 128)
-        X = torch.from_numpy(geom).float().unsqueeze(0).cuda()
+        X = torch.from_numpy(geom).float().unsqueeze(0).to(device)
         with torch.no_grad():
             out = model(X).cpu().numpy()[0, 0]
         # Normalised output should stay roughly in [0, 1] for interior nodes

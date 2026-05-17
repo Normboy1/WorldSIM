@@ -475,24 +475,45 @@ MAP-Elites maintains a grid archive of diverse solutions. Each cell holds the be
 
 ```python
 # Alloy composition search
-result = core.run_experiment(qdreq("mapelites_alloy_search", {
-    "elements": ["Ni", "Cr", "Co", "Al", "Mo"],
-    "bounds": {
-        "Ni": [0.40, 0.70], "Cr": [0.10, 0.25],
-        "Co": [0.05, 0.15], "Al": [0.03, 0.10],
-        "Mo": [0.01, 0.05],
-    },
-    "n_iterations": 500,
-    "dim1_bins": 10,   # archive grid size (10×10 = 100 cells)
-    "dim2_bins": 10,
-    "dim1_range": [6.5, 9.0],  # VEC (valence electron count) range
-    "dim2_range": [7.5, 11.0], # density range (g/cm³)
-}))
+# NOTE: mapelites_alloy_search requires Python callables (quality_fn, feature_fn)
+# and must be called directly — these cannot be passed through the JSON dispatcher.
+from simlab.engines.qdgeometry.mapelites import mapelites_alloy_search
 
-arch = result.results["archive"]
-print(arch["coverage"])       # fraction of cells filled
-print(arch["n_elites"])       # number of distinct elite solutions
-print(result.results["best_composition"]) # highest-quality composition found
+ELEMENTS = ["Ni", "Cr", "Co", "Al", "Mo"]
+BOUNDS = {
+    "Ni": (0.40, 0.70), "Cr": (0.10, 0.25),
+    "Co": (0.05, 0.15), "Al": (0.03, 0.10),
+    "Mo": (0.01, 0.05),
+}
+
+def quality_fn(comp: dict) -> float:
+    """Proxy: penalise high Al (gamma-prime strengthening vs oxidation trade-off)."""
+    return float(1.0 - comp.get("Al", 0.0) * 5.0)
+
+def feature_fn(comp: dict) -> tuple:
+    """Behavioural features: estimated VEC and density proxy."""
+    vec_weights = {"Ni": 10, "Cr": 6, "Co": 9, "Al": 3, "Mo": 6}
+    rho_weights = {"Ni": 8.9, "Cr": 7.2, "Co": 8.9, "Al": 2.7, "Mo": 10.2}
+    vec = sum(comp.get(e, 0) * vec_weights.get(e, 8) for e in ELEMENTS)
+    rho = sum(comp.get(e, 0) * rho_weights.get(e, 8) for e in ELEMENTS)
+    return float(vec), float(rho)
+
+result = mapelites_alloy_search(
+    elements=ELEMENTS,
+    bounds=BOUNDS,
+    quality_fn=quality_fn,
+    feature_fn=feature_fn,
+    n_iterations=500,
+    dim1_bins=10,   # archive grid size (10×10 = 100 cells)
+    dim2_bins=10,
+    dim1_range=(6.5, 9.0),  # VEC range
+    dim2_range=(7.5, 11.0), # density range (g/cm³)
+)
+
+arch = result["archive"]
+print(arch["coverage"])           # fraction of cells filled
+print(arch["n_elites"])           # number of distinct elite solutions
+print(result["best_composition"]) # highest-quality composition found
 
 # Geometry shape search
 result = core.run_experiment(qdreq("mapelites_geometry_search", {
@@ -789,7 +810,7 @@ python -m pytest tests/ -s -q
 
 **Expected output:**
 ```
-79 passed in ~4s
+125 passed in ~7s
 ```
 
 The test suite requires:

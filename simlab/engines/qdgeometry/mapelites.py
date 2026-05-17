@@ -500,3 +500,139 @@ def mapelites_sphere_benchmark(
             "qd_score":    0.70,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# GPU-resident MAP-Elites archive (CuPy / NumPy fallback)
+# ---------------------------------------------------------------------------
+
+try:
+    import cupy as _cupy
+    _CUPY = True
+except ImportError:
+    _cupy = None  # type: ignore
+    _CUPY = False
+
+
+class GPUMAPElitesArchive:
+    """MAP-Elites archive backed by a CuPy GPU array when available.
+
+    The quality grid is stored as a flat float32 array on the GPU (cupy) or
+    CPU (numpy) depending on what is installed. The solution index is always
+    a Python dict (solutions are arbitrary objects and not GPU-resident).
+
+    When cupy is not installed, falls back to NumPy automatically — the
+    interface is identical in both cases.
+
+    Parameters
+    ----------
+    dim1_bins, dim2_bins : int
+        Number of cells per feature axis. Total cells = dim1_bins × dim2_bins.
+    dim1_range, dim2_range : (float, float)
+        Feature value ranges for grid axes.
+    """
+
+    def __init__(
+        self,
+        dim1_bins:  int,
+        dim2_bins:  int,
+        dim1_range: tuple[float, float],
+        dim2_range: tuple[float, float],
+    ):
+        self.dim1_bins   = int(dim1_bins)
+        self.dim2_bins   = int(dim2_bins)
+        self.dim1_range  = tuple(dim1_range)
+        self.dim2_range  = tuple(dim2_range)
+        self.n_cells     = self.dim1_bins * self.dim2_bins
+        self._backend    = "cupy_gpu" if _CUPY else "numpy_cpu"
+
+        # Quality grid on GPU (or CPU) — -inf = empty cell
+        xp = _cupy if _CUPY else np
+        self._quality = xp.full(self.n_cells, -np.inf, dtype=xp.float32)
+
+        # Solution store: always CPU (solutions are arbitrary Python objects)
+        self._solutions: dict[int, Any] = {}
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _cell_index(self, f1: float, f2: float) -> int:
+        lo1, hi1 = self.dim1_range
+        lo2, hi2 = self.dim2_range
+        i1 = int(np.clip((f1 - lo1) / (hi1 - lo1 + 1e-12) * self.dim1_bins, 0, self.dim1_bins - 1))
+        i2 = int(np.clip((f2 - lo2) / (hi2 - lo2 + 1e-12) * self.dim2_bins, 0, self.dim2_bins - 1))
+        return i1 * self.dim2_bins + i2
+
+    def _quality_np(self) -> np.ndarray:
+        if _CUPY and isinstance(self._quality, _cupy.ndarray):
+            return self._quality.get()
+        return np.asarray(self._quality)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def try_insert(self, solution: Any, quality: float, f1: float, f2: float) -> bool:
+        """Insert solution if quality exceeds the current elite in the cell."""
+        idx = self._cell_index(f1, f2)
+        xp  = _cupy if _CUPY else np
+        current_q = float(self._quality[idx])
+        if quality > current_q:
+            self._quality[idx] = xp.float32(quality)
+            self._solutions[idx] = {"solution": solution, "quality": quality,
+                                    "f1": f1, "f2": f2}
+            return True
+        return False
+
+    def coverage(self) -> float:
+        q_np = self._quality_np()
+        return float(np.sum(q_np > -np.inf) / self.n_cells)
+
+    def best(self) -> dict | None:
+        if not self._solutions:
+            return None
+        return max(self._solutions.values(), key=lambda v: v["quality"])
+
+    def sample_elite(self, rng: np.random.Generator) -> dict | None:
+        if not self._solutions:
+            return None
+        return rng.choice(list(self._solutions.values()))
+
+    def qd_score(self) -> float:
+        q_np = self._quality_np()
+        filled = q_np[q_np > -np.inf]
+        return float(filled.mean()) if len(filled) > 0 else 0.0
+
+    def to_dict(self) -> dict:
+        q_np = self._quality_np()
+        elites = []
+        for idx, v in self._solutions.items():
+            sol = v["solution"]
+            elites.append({
+                "cell_idx": idx,
+                "quality":  v["quality"],
+                "f1":       v["f1"],
+                "f2":       v["f2"],
+                **(sol if isinstance(sol, dict) else {"solution": sol}),
+            })
+        return {
+            "backend":      self._backend,
+            "dim1_bins":    self.dim1_bins,
+            "dim2_bins":    self.dim2_bins,
+            "n_cells":      self.n_cells,
+            "n_elites":     len(self._solutions),
+            "coverage":     self.coverage(),
+            "qd_score":     self.qd_score(),
+            "best_quality": self.best()["quality"] if self.best() else None,
+            "elites":       elites,
+        }
+
+    @staticmethod
+    def backend_info() -> dict:
+        return {
+            "cupy_available":       _CUPY,
+            "cupy_version":         getattr(_cupy, "__version__", None) if _CUPY else None,
+            "active_backend":       "cupy_gpu" if _CUPY else "numpy_cpu",
+            "install_cupy":         "pip install cupy-cuda12x  (match your CUDA version)",
+        }

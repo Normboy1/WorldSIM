@@ -43,7 +43,7 @@ calphad:
 dft:
   # ASE calculator to use: "vasp", "espresso", "cp2k", or "emt" (always available).
   # "emt" is ASE's built-in empirical tight-binding — useful for testing; not DFT quality.
-  calculator: emt
+  calculator: espresso
 
   # VASP settings (used when calculator = "vasp")
   vasp:
@@ -60,7 +60,7 @@ dft:
 
   # Quantum ESPRESSO settings (used when calculator = "espresso")
   espresso:
-    command: pw.x
+    command: /home/norman/Vibes/maxosl-ai-research/ResearchGrants/WorldSIM/external/dft/qe-7.5/bin/pw.x
     pseudopotentials: {}       # dict: element -> UPF filename
     input_data:
       control:

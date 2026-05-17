@@ -97,6 +97,7 @@ _REQUIRED_PARAMS: dict[tuple[str, str], list[str]] = {
     ("materials", "calphad_phase_equilibrium"): ["composition"],
     ("materials", "calphad_phase_scan"):         ["composition"],
     ("materials", "calphad_binary_diagram"):     ["element_a", "element_b"],
+    ("materials", "calphad_phase_diagram"):      ["element_a", "element_b"],
     ("materials", "tcp_phase_check"):            ["composition"],
     ("materials", "oxide_phase_equilibrium"):    ["composition"],
     # DFT
@@ -218,7 +219,7 @@ _REQUIRED_PARAMS: dict[tuple[str, str], list[str]] = {
     ("nvidia", "alchemi_mlip"):         ["species", "positions_angstrom", "lattice_vectors_angstrom"],
     ("nvidia", "alchemi_batch_screen"): ["compositions"],
     ("nvidia", "warp_diffusion"):       ["grid_shape", "alpha", "steps"],
-    ("nvidia", "warp_allen_cahn"):      ["phi", "M", "kappa", "dt", "steps"],
+    ("nvidia", "warp_allen_cahn"):      [],   # phi/M/kappa/dt/steps all have defaults
     ("nvidia", "warp_allen_cahn_field"):["grid_shape", "M", "kappa", "dt", "steps"],
     ("nvidia", "warp_diffusion_3d"):    ["grid_shape", "alpha", "steps"],
     ("nvidia", "nemo_train_fno"):       ["X_train", "y_train"],
@@ -254,6 +255,21 @@ _REQUIRED_PARAMS: dict[tuple[str, str], list[str]] = {
     # QD geometry engine — CalculiX FEM validation
     ("qdgeometry", "calculix_validate"):         [],
     ("qdgeometry", "calculix_thermal"):          [],
+    # QD geometry engine — PhysicsNeMo FNO2d (real NVIDIA backbone)
+    ("qdgeometry", "physicsnemo_fno_train"):     [],
+    ("qdgeometry", "physicsnemo_fno_infer"):     [],
+    ("qdgeometry", "physicsnemo_fno_export"):    [],
+    # QD geometry engine — TRT / ONNX Runtime inference
+    ("qdgeometry", "trt_infer"):                 [],
+    ("qdgeometry", "trt_backend_status"):        [],
+    # QD geometry engine — GPU MAP-Elites (CuPy-resident archive)
+    ("qdgeometry", "gpu_mapelites_info"):        [],
+    ("qdgeometry", "gpu_mapelites_benchmark"):   [],
+    # QD geometry engine — Warp stress / pressure solvers
+    ("qdgeometry", "warp_von_mises"):            [],
+    ("qdgeometry", "warp_pressure_poisson"):     [],
+    # NVIDIA — PhysicsNeMo blade thermal FNO
+    ("nvidia", "nemo_blade_fno_train"):          [],
 }
 
 # Chemical safety keyword blocklist (SMILES substrings / names)

@@ -162,7 +162,7 @@ class HydrogenOrbitalEngine:
         r = np.linspace(0.0, r_max, int(n_points))
         R = _radial_wavefunction(n, l, r, Z)
         probability_density = r ** 2 * R ** 2
-        integral = float(np.trapz(probability_density, r))
+        integral = float(np.trapezoid(probability_density, r))
         return {
             "n": n,
             "l": l,

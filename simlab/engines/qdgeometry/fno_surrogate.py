@@ -531,3 +531,64 @@ def load_model(path: str, **model_kwargs) -> "BladeFNO":
     if "history" in state:
         model._history = state["history"]
     return model
+
+
+def export_to_onnx(
+    model: "BladeFNO",
+    onnx_path: str,
+    ny: int = 64,
+    nx: int = 128,
+) -> dict:
+    """Export BladeFNO to ONNX for deployment or TensorRT conversion.
+
+    The exported graph accepts a (1, in_channels, ny, nx) float32 tensor and
+    returns a (1, 1, ny, nx) normalised temperature field.
+
+    TensorRT conversion (after export):
+        trtexec --onnx=blade_fno.onnx --saveEngine=blade_fno.trt --fp16
+
+    Parameters
+    ----------
+    model     : trained BladeFNO instance
+    onnx_path : output path for the .onnx file
+    ny, nx    : spatial grid size (must match training resolution)
+
+    Returns
+    -------
+    dict with keys: onnx_path, input_shape, output_shape, opset
+    """
+    if not _TORCH:
+        raise RuntimeError("PyTorch required for ONNX export")
+    import torch
+
+    model.eval()
+    device = next(model.parameters()).device
+    dummy = torch.zeros(1, model.in_channels, ny, nx, device=device)
+
+    from torch.onnx import utils as _onnx_utils
+    _onnx_utils.export(
+        model,
+        (dummy,),
+        onnx_path,
+        opset_version=17,
+        input_names=["geometry"],
+        output_names=["T_normalised"],
+        dynamic_axes={
+            "geometry":    {0: "batch"},
+            "T_normalised": {0: "batch"},
+        },
+        do_constant_folding=True,
+    )
+
+    return {
+        "onnx_path":    onnx_path,
+        "input_shape":  [1, model.in_channels, ny, nx],
+        "output_shape": [1, 1, ny, nx],
+        "opset":        17,
+        "trt_command":  f"trtexec --onnx={onnx_path} --saveEngine=blade_fno.trt --fp16",
+        "note": (
+            "ONNX exported. For TensorRT: run trt_command above, then load "
+            "blade_fno.trt with tensorrt.Runtime. Complex-valued spectral "
+            "layers are decomposed to real ops by ONNX export."
+        ),
+    }

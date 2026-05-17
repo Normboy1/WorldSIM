@@ -145,7 +145,7 @@ class StressStrainEngine:
             "ultimate_strain": float(ultimate_strain),
             "fracture_strain": float(fracture_strain),
             "E": E,
-            "toughness_approx": float(np.trapz(stress_arr, strain_arr)),
+            "toughness_approx": float(np.trapezoid(stress_arr, strain_arr)),
             "resilience": float(0.5 * yield_stress * yield_strain),
         }
 

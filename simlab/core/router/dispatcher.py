@@ -6,9 +6,40 @@ Routes ExperimentRequest objects to the appropriate engine method based on
 
 from __future__ import annotations
 
+import math
 from typing import Any, Callable
 
+import numpy as np
+
 from simlab.core.schemas.experiment import ExperimentRequest, ExperimentResult
+
+
+def _sanitize_result(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable values to serializable form.
+
+    - numpy scalars → Python float/int
+    - numpy arrays → nested lists
+    - keys starting with '_' (in-process handles like _model) → removed
+    - NaN/Inf floats → None
+    """
+    if isinstance(obj, dict):
+        return {
+            k: _sanitize_result(v)
+            for k, v in obj.items()
+            if not (isinstance(k, str) and k.startswith("_"))
+        }
+    if isinstance(obj, list):
+        return [_sanitize_result(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        v = float(obj)
+        return None if (math.isnan(v) or math.isinf(v)) else v
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    return obj
 
 # --- Engine lazy imports wrapped in callables to avoid import cost at startup ---
 
@@ -309,6 +340,143 @@ def _get_qdgeometry():
             from simlab.engines.qdgeometry.calculix_validate import calculix_thermal
             return calculix_thermal(**kwargs)
 
+        # ── PhysicsNeMo FNO2d (real NVIDIA backbone) ───────────────────────
+        def physicsnemo_fno_train(self, **kwargs):
+            from simlab.engines.qdgeometry.physicsnemo_fno import (
+                train_fno_nemo, save_nemo_model,
+            )
+            from simlab.engines.qdgeometry.fno_surrogate import generate_training_data
+            n_samples = kwargs.pop("n_samples", 60)
+            nx = kwargs.pop("nx", 128)
+            ny = kwargs.pop("ny", 64)
+            save_path = kwargs.pop("save_path", "data/blade_nemo.pt")
+            dataset = generate_training_data(n_samples=n_samples, nx=nx, ny=ny)
+            model, history = train_fno_nemo(dataset, **kwargs)
+            save_nemo_model(model, save_path, history=history)
+            history["saved_to"] = save_path
+            return history
+
+        def physicsnemo_fno_infer(self, **kwargs):
+            from simlab.engines.qdgeometry.physicsnemo_fno import (
+                load_nemo_model, predict_nemo,
+            )
+            from simlab.engines.qdgeometry.fno_surrogate import encode_geometry
+            model_path = kwargs.pop("model_path", "data/blade_nemo.pt")
+            hole_cx    = kwargs.pop("hole_cx", [0.3, 0.7])
+            hole_cy    = kwargs.pop("hole_cy", [0.3, 0.3])
+            hole_r     = kwargs.pop("hole_r",  [0.05, 0.05])
+            nx = kwargs.pop("nx", 128)
+            ny = kwargs.pop("ny", 64)
+            T_min = kwargs.pop("T_min", 400.0)
+            T_max = kwargs.pop("T_max", 1300.0)
+            n_mc  = kwargs.pop("n_mc", 0)
+            model = load_nemo_model(model_path)
+            T_norm = (getattr(model, "_history", {}).get("T_norm") or {})
+            geom   = encode_geometry(hole_cx, hole_cy, hole_r, ny, nx)
+            T_field, std = predict_nemo(
+                model, geom,
+                T_min=T_norm.get("min", T_min),
+                T_max=T_norm.get("max", T_max),
+                n_mc=n_mc,
+            )
+            result = {
+                "backend":    "physicsnemo_fno2d",
+                "T_mean":     float(T_field.mean()),
+                "T_field":    T_field.tolist(),
+                "n_mc":       n_mc,
+            }
+            if std is not None:
+                result["T_std"] = std.tolist()
+                result["T_std_mean"] = float(std.mean())
+            return result
+
+        def physicsnemo_fno_export(self, **kwargs):
+            from simlab.engines.qdgeometry.physicsnemo_fno import (
+                load_nemo_model, export_nemo_onnx,
+            )
+            model_path = kwargs.pop("model_path", "data/blade_nemo.pt")
+            onnx_path  = kwargs.pop("onnx_path",  "data/blade_nemo.onnx")
+            nx = kwargs.pop("nx", 128)
+            ny = kwargs.pop("ny", 64)
+            model  = load_nemo_model(model_path)
+            return export_nemo_onnx(model, onnx_path, ny=ny, nx=nx)
+
+        # ── TRT / ONNX Runtime inference ───────────────────────────────────
+        def trt_infer(self, **kwargs):
+            from simlab.engines.qdgeometry.trt_inference import TRTInferenceEngine
+            from simlab.engines.qdgeometry.fno_surrogate import encode_geometry
+            onnx_path = kwargs.pop("onnx_path", None)
+            trt_path  = kwargs.pop("trt_path",  None)
+            hole_cx   = kwargs.pop("hole_cx", [0.3, 0.7])
+            hole_cy   = kwargs.pop("hole_cy", [0.3, 0.3])
+            hole_r    = kwargs.pop("hole_r",  [0.05, 0.05])
+            nx = kwargs.pop("nx", 128)
+            ny = kwargs.pop("ny", 64)
+            T_min = kwargs.pop("T_min", 400.0)
+            T_max = kwargs.pop("T_max", 1300.0)
+            if trt_path:
+                eng = TRTInferenceEngine.from_trt(trt_path)
+            elif onnx_path:
+                eng = TRTInferenceEngine.from_onnx(onnx_path)
+            else:
+                raise ValueError("Provide onnx_path or trt_path")
+            geom = encode_geometry(hole_cx, hole_cy, hole_r, ny, nx)
+            return eng.infer(geom, T_min=T_min, T_max=T_max)
+
+        def trt_backend_status(self, **kwargs):
+            from simlab.engines.qdgeometry.trt_inference import TRTInferenceEngine
+            return TRTInferenceEngine.available_backends()
+
+        # ── GPU MAP-Elites archive ─────────────────────────────────────────
+        def gpu_mapelites_info(self, **kwargs):
+            from simlab.engines.qdgeometry.mapelites import GPUMAPElitesArchive
+            return GPUMAPElitesArchive.backend_info()
+
+        def gpu_mapelites_sphere_benchmark(self, **kwargs):
+            from simlab.engines.qdgeometry.mapelites import GPUMAPElitesArchive
+            import numpy as np
+            n_dims   = int(kwargs.get("n_dims",   20))
+            n_iter   = int(kwargs.get("n_iter",   2000))
+            grid_bins = int(kwargs.get("grid_bins", 10))
+            lo, hi   = -5.0, 5.0
+            seed     = int(kwargs.get("seed", 42))
+            rng      = np.random.default_rng(seed)
+            arch = GPUMAPElitesArchive(grid_bins, grid_bins, (lo, hi), (lo, hi))
+
+            def _q(x): return float(1.0 - np.dot(x, x) / (n_dims * 25.0))
+
+            x = rng.uniform(lo, hi, (100, n_dims))
+            for xi in x:
+                arch.try_insert({"x": xi.tolist()}, _q(xi), float(xi[0]), float(xi[1]))
+
+            n_evals = 100
+            for _ in range(n_iter):
+                elite = arch.sample_elite(rng)
+                if elite is not None:
+                    parent = np.array(elite["solution"]["x"])
+                    child  = parent + rng.normal(0, 0.5, n_dims)
+                    child  = np.clip(child, lo, hi)
+                else:
+                    child = rng.uniform(lo, hi, n_dims)
+                arch.try_insert({"x": child.tolist()}, _q(child), float(child[0]), float(child[1]))
+                n_evals += 1
+
+            return {
+                **arch.to_dict(),
+                "n_evaluations": n_evals,
+                "n_dims": n_dims,
+                "reference": "Mouret & Clune (2015) arXiv:1504.04909",
+            }
+
+        # ── Warp stress / pressure kernels ─────────────────────────────────
+        def warp_von_mises(self, **kwargs):
+            from simlab.engines.materials.nvidia_backends import WarpBackend
+            return WarpBackend().warp_laplacian_stress(**kwargs)
+
+        def warp_pressure_poisson(self, **kwargs):
+            from simlab.engines.materials.nvidia_backends import WarpBackend
+            return WarpBackend().warp_pressure_poisson(**kwargs)
+
     return _QDGeometryRouter()
 
 
@@ -436,6 +604,8 @@ _ROUTING_TABLE: dict[tuple[str, str], RoutingEntry] = {
     ("materials", "calphad_phase_equilibrium"):(_get_materials_gpu_workflow, "calphad_phase_equilibrium", None),
     ("materials", "calphad_phase_scan"):       (_get_materials_gpu_workflow, "calphad_phase_scan",    None),
     ("materials", "calphad_binary_diagram"):   (_get_materials_gpu_workflow, "calphad_binary_diagram",None),
+    ("materials", "calphad_phase_diagram"):    (_get_materials_gpu_workflow, "calphad_binary_diagram",
+                                                {"element_a": "element_a", "element_b": "element_b"}),
     ("materials", "tcp_phase_check"):          (_get_materials_gpu_workflow, "tcp_phase_check",       None),
     ("materials", "oxide_phase_equilibrium"):  (_get_materials_gpu_workflow, "oxide_phase_equilibrium", None),
     # --- Materials: DFT ---
@@ -571,6 +741,21 @@ _ROUTING_TABLE: dict[tuple[str, str], RoutingEntry] = {
     # --- QD Geometry: CalculiX FEM validation ---
     ("qdgeometry", "calculix_validate"):         (_get_qdgeometry, "calculix_validate",         None),
     ("qdgeometry", "calculix_thermal"):          (_get_qdgeometry, "calculix_thermal",          None),
+    # --- QD Geometry: PhysicsNeMo FNO2d (real NVIDIA backbone) ---
+    ("qdgeometry", "physicsnemo_fno_train"):     (_get_qdgeometry, "physicsnemo_fno_train",     None),
+    ("qdgeometry", "physicsnemo_fno_infer"):     (_get_qdgeometry, "physicsnemo_fno_infer",     None),
+    ("qdgeometry", "physicsnemo_fno_export"):    (_get_qdgeometry, "physicsnemo_fno_export",    None),
+    # --- QD Geometry: TRT / ONNX Runtime inference ---
+    ("qdgeometry", "trt_infer"):                 (_get_qdgeometry, "trt_infer",                 None),
+    ("qdgeometry", "trt_backend_status"):        (_get_qdgeometry, "trt_backend_status",        None),
+    # --- QD Geometry: GPU MAP-Elites (CuPy-resident archive) ---
+    ("qdgeometry", "gpu_mapelites_info"):        (_get_qdgeometry, "gpu_mapelites_info",        None),
+    ("qdgeometry", "gpu_mapelites_benchmark"):   (_get_qdgeometry, "gpu_mapelites_sphere_benchmark", None),
+    # --- QD Geometry: Warp stress / pressure solvers ---
+    ("qdgeometry", "warp_von_mises"):            (_get_qdgeometry, "warp_von_mises",            None),
+    ("qdgeometry", "warp_pressure_poisson"):     (_get_qdgeometry, "warp_pressure_poisson",     None),
+    # --- NVIDIA: PhysicsNeMo blade thermal FNO ---
+    ("nvidia", "nemo_blade_fno_train"):          (_get_physicsnemo, "train_blade_fno",          None),
     # --- Hybrid ---
     ("hybrid", "reaction_kinetics"):   (_get_kinetics, "simulate_first_order", None),
     ("hybrid", "consecutive_kinetics"):(_get_kinetics, "simulate_consecutive_reactions", None),
@@ -624,6 +809,11 @@ class ExperimentDispatcher:
             method = getattr(engine, method_name)
             raw_result = method(**params)
 
+            # Sanitize: strip non-JSON-serializable objects before handing to Pydantic.
+            # Keys starting with "_" are in-process handles (models, file handles, etc.)
+            if isinstance(raw_result, dict):
+                raw_result = _sanitize_result(raw_result)
+
             # Methods that return a raw base64 PNG string (e.g. binding_energy_curve,
             # nuclear_chart) go directly into plots, not results.
             if isinstance(raw_result, str):
@@ -636,6 +826,13 @@ class ExperimentDispatcher:
                     plots=[raw_result],
                     metadata={"solver": req.solver, "environment": req.environment},
                 )
+
+            if isinstance(raw_result, np.ndarray):
+                arr = raw_result
+                raw_result = _sanitize_result({
+                    "array": arr,
+                    "shape": list(arr.shape),
+                })
 
             if isinstance(raw_result, (int, float)):
                 raw_result = {"value": raw_result}

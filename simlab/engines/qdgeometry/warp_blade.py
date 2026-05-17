@@ -171,9 +171,9 @@ def _build_masks_warp(
 
 
 def warp_blade_thermal(
-    hole_cx:   list[float],
-    hole_cy:   list[float],
-    hole_r:    list[float],
+    hole_cx:   list[float] | None = None,
+    hole_cy:   list[float] | None = None,
+    hole_r:    list[float] | None = None,
     nx:        int   = 256,
     ny:        int   = 128,
     T_hot:     float = 1300.0,
@@ -198,6 +198,14 @@ def warp_blade_thermal(
     dict with keys: T_field (ny×nx ndarray), T_mean, T_hot, backend,
                     iters, wall_time_s, grad_T_mean (if compute_grad)
     """
+    # ── Default cooling-hole layout (two interior holes) ────────────────────
+    if hole_cx is None and hole_cy is None and hole_r is None:
+        hole_cx, hole_cy, hole_r = [0.3, 0.7], [0.5, 0.5], [0.08, 0.08]
+    elif hole_cx is None or hole_cy is None or hole_r is None:
+        raise ValueError(
+            "hole_cx, hole_cy, hole_r must all be provided together, or all omitted"
+        )
+
     # ── Input validation ────────────────────────────────────────────────────
     if len(hole_cx) != len(hole_cy) or len(hole_cx) != len(hole_r):
         raise ValueError(
@@ -252,6 +260,8 @@ def warp_blade_thermal(
     T_a = wp.array(T_init,             dtype=wp.float32, device=device)
     T_b = wp.array(T_init.copy(),      dtype=wp.float32, device=device)
 
+    check_every = max(1, min(50, max_iters // 20))
+    converged = False
     iters = 0
     for iters in range(max_iters):
         wp.launch(_jacobi_step_kernel, dim=(ny, nx),
@@ -260,25 +270,41 @@ def warp_blade_thermal(
                   device=device)
         T_a, T_b = T_b, T_a
 
-    # Compute T_mean over interior solid nodes (CPU, after field copy)
+        if tol > 0 and (iters + 1) % check_every == 0:
+            T_curr = T_a.numpy()
+            T_prev = T_b.numpy()
+            residual = float(np.abs(T_curr - T_prev).max())
+            if residual < tol:
+                converged = True
+                break
+
+    # Compute T_mean and T_interior_peak over interior solid nodes (CPU, after field copy)
+    # Interior = solid blade nodes excluding the Dirichlet outer wall and Robin hole walls.
+    # T_mean and T_interior_peak are the meaningful optimization objectives; T.max() is
+    # boundary-pinned at T_hot and is NOT a valid engineering objective.
     T_field = T_a.numpy()
     interior_mask = (blade_np == 1) & (outer_np == 0) & (cool_np == 0)
     if interior_mask.sum() > 0:
-        T_mean = float(T_field[interior_mask].mean())
+        T_interior = T_field[interior_mask]
+        T_mean = float(T_interior.mean())
+        T_interior_peak = float(T_interior.max())
     else:
         T_mean = float(T_field[blade_np == 1].mean()) if blade_np.sum() > 0 else float(T_hot)
+        T_interior_peak = T_mean
 
     wall_time = time.perf_counter() - t0
 
     result: dict[str, Any] = {
-        "backend":      "warp_kernel",
-        "T_field":      T_field,
-        "T_mean":       T_mean,
-        "T_hot":        float(T_hot),
-        "T_cool":       float(T_cool),
-        "iters":        iters + 1,
-        "n_holes":      len(hole_cx),
-        "wall_time_s":  wall_time,
+        "backend":          "warp_kernel",
+        "T_field":          T_field.tolist(),
+        "T_mean":           T_mean,
+        "T_interior_peak":  T_interior_peak,  # peak over unconstrained interior nodes
+        "T_hot":            float(T_hot),
+        "T_cool":           float(T_cool),
+        "iters":            iters + 1,
+        "converged":        converged,
+        "n_holes":          len(hole_cx),
+        "wall_time_s":      wall_time,
         "nx": nx, "ny": ny,
     }
 
@@ -303,7 +329,13 @@ def warp_blade_thermal(
                                            max_iters=500, tol=tol)
                 grads_cx.append((res_p["T_mean"] - res_m["T_mean"]) / (2 * eps))
             result["grad_T_mean_cx"] = grads_cx
-            result["grad_note"] = "finite-difference; wp.Tape full-unroll pending"
+            result["grad_method"] = "central_finite_difference"
+            result["grad_eps"] = eps
+            result["grad_note"] = (
+                "Gradients computed by central finite differences (Δcx=±0.01). "
+                "wp.Tape autodiff through 3000 Jacobi iterations requires "
+                "gradient checkpointing and is not yet implemented."
+            )
         except Exception as exc:
             result["grad_error"] = str(exc)
 

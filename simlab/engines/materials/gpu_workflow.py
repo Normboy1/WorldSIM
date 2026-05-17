@@ -466,12 +466,18 @@ class MaterialsGPUWorkflowEngine:
         dt: float = 0.01,
         steps: int = 500,
         phi_seed: int = 42,
+        n_grains: int | None = None,
     ) -> dict[str, Any]:
         """Run Allen-Cahn phase-field grain coarsening via WarpBackend.
 
         Evolves a random initial phase field (phi ≈ 0.5 ± 0.05) under the
         Allen-Cahn equation with a double-well potential driving grain growth.
         Uses the Warp GPU kernel when CUDA is available.
+
+        ``n_grains`` is accepted for API compatibility but does not change the
+        simulation: this single-order-parameter model does not resolve
+        individual grains. Use a multi-phase-field model for grain-count
+        control. The requested value is echoed back in the result metadata.
         """
         if len(grid_shape) != 2:
             raise ValueError("grid_shape must contain two dimensions.")
@@ -515,6 +521,7 @@ class MaterialsGPUWorkflowEngine:
                 "centerline": field[:, ny // 2].tolist(),
             },
             "field": field.tolist(),
+            "n_grains_requested": int(n_grains) if n_grains is not None else None,
             "model_limits": [
                 "Single-order-parameter Allen-Cahn — does not resolve individual grain orientations.",
                 "Use a multi-phase-field model for grain boundary engineering predictions.",
