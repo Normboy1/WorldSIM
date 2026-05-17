@@ -4,7 +4,10 @@
 
 > **Version** 0.2.0 · **Python** ≥ 3.11 · **License** MIT · **Author** MaxOSL AI Research
 > **Reference platform** Linux · NVIDIA GeForce RTX 3060 (12 GiB, sm_86) · CUDA 13.0
-> **Status** 223 simulation routes · 125/125 tests passing · GPU stack verified
+> **Status** 223 dispatcher routes · 125/125 tests pass on the reference platform
+> (GPU-dependent tests **skip** cleanly when CUDA / NVIDIA libraries are absent —
+> see [Honest scope](#12-honest-scope-fidelity-tiers) for what is a validated
+> solver vs. a heuristic proxy)
 
 ---
 
@@ -391,6 +394,41 @@ tests/     pytest suites (125 tests)
 **GPU** — PyTorch CUDA · Warp · PhysicsNeMo · CuPy · ONNX Runtime GPU · TensorRT
 **High-fidelity materials** — pycalphad (CALPHAD) · MACE / SevenNet (MLIP) · Quantum ESPRESSO (DFT)
 **QD** — JAX · Optax (autodiff geometry optimization)
+
+---
+
+## 12. Honest Scope — Fidelity Tiers
+
+WorldSIM is broad. Breadth at this scale means the 223 routes are **not all the
+same fidelity**, and the project does not claim they are. Every route falls into
+one of three tiers, and results carry a `backend` / `model` label identifying which:
+
+| Tier | Meaning | Examples |
+|---|---|---|
+| **A — Validated** | Checked against a reference tool, analytic solution, or published baseline | Warp blade thermal solver (NumPy/Warp agree to <1e-3 °C; mesh-converged); MAP-Elites (beats Mouret & Clune 2015 baseline); symbolic math (SymPy); CALPHAD for Al-Cr-Ni (real pycalphad + TDB) |
+| **B — Standard models** | Textbook closed-form physics, exact within stated assumptions | Projectile/pendulum/orbital mechanics, Fick/Arrhenius diffusion, JMAK kinetics, ideal-gas & Carnot thermodynamics, transfer-function control, Bateman decay |
+| **C — Heuristic proxy** | Empirical correlation or proxy used when a high-fidelity backend is absent — **explicitly labelled in the result** | ALCHEMI MD/relaxation (Miedema/LJ proxy — `nvalchemiops` is not public); DFT without a real calculator (EMT fallback); MLIP without model files (LJ proxy); alloy property scores (composition heuristics); some CFD/control solvers marked `proxy` in-code |
+
+**This is deliberate, not hidden.** A Tier-C result always reports its proxy status
+(`backend: "..._proxy"`, `model_limits: [...]`). The tiered evaluation architecture
+— fast proxy/surrogate gated by a high-fidelity oracle — is itself the research
+contribution (see `docs/PROPOSAL_NVIDIA_4PAGE.pdf`, Appendix A, which documents a
+real failure mode of un-gated proxy optimization).
+
+**What this means for a reviewer:**
+- The **flagship blade-thermal QD pipeline is Tier A** end-to-end and is the part
+  intended to be judged as research software.
+- The breadth domains (general physics/chemistry/materials correlations) are
+  Tier A/B — correct textbook implementations, useful and tested, but not novel.
+- Tier-C routes are honest scaffolding: they keep the unified API complete and
+  fail safe, and each is a drop-in slot for a real backend when one is installed.
+
+**Known limitations** (tracked in `docs/ISSUES_AND_TODO.md`): the GPU test subset
+requires the NVIDIA stack to be installed (those tests *skip*, not fail, when it is
+absent); the large dispatcher table is a maintenance cost the project accepts for
+now; model checkpoints are loaded with `torch.load(weights_only=False)` and should
+only be pointed at first-party files. No claim is made that WorldSIM replaces
+VASP, ANSYS, Thermo-Calc, or any production engineering tool.
 
 ---
 

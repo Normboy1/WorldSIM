@@ -34,4 +34,4 @@ arXiv and PubChem access is **network-dependent**. Configure **`SIMLAB_DATA_CACH
 
 ## Versioning
 
-This documentation matches the **0.1.x** line. Experiment catalogs and tools may expand; re-run `SimLabCore().available_experiments()` after upgrades.
+This documentation matches the **0.2.x** line (see `pyproject.toml` for the authoritative version). Experiment catalogs and tools may expand; re-run `SimLabCore().available_experiments()` after upgrades.

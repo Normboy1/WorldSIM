@@ -170,6 +170,69 @@ def _build_masks_warp(
     return blade_np, outer_np, cool_np, interior_count
 
 
+def _jacobi_numpy(
+    T: np.ndarray,
+    blade: np.ndarray,
+    outer: np.ndarray,
+    cool: np.ndarray,
+    T_hot: float,
+    T_cool: float,
+    alpha_c: float,
+    max_iters: int,
+    tol: float,
+) -> tuple[np.ndarray, int, bool]:
+    """Vectorised NumPy Jacobi solver — exact CPU mirror of ``_jacobi_step_kernel``.
+
+    Used when Warp/CUDA is unavailable. Applies the same Dirichlet (outer wall),
+    Robin (cooling holes) and Neumann (insulated blade surface) boundary
+    conditions as the Warp kernel, so results match to floating-point tolerance.
+    """
+    blade_b = blade == 1
+    outer_b = outer == 1
+    cool_b = cool == 1
+    interior_b = blade_b & ~outer_b & ~cool_b
+    check_every = max(1, min(50, max_iters // 20))
+    converged = False
+    iters = 0
+
+    def _shift(a, axis, fwd):
+        out = a.copy()
+        if axis == 0 and fwd:
+            out[1:, :] = a[:-1, :]
+        elif axis == 0:
+            out[:-1, :] = a[1:, :]
+        elif fwd:
+            out[:, 1:] = a[:, :-1]
+        else:
+            out[:, :-1] = a[:, 1:]
+        return out
+
+    bn, bs = _shift(blade_b, 0, True), _shift(blade_b, 0, False)
+    bw, be = _shift(blade_b, 1, True), _shift(blade_b, 1, False)
+
+    for iters in range(max_iters):
+        # Neumann mirror: if a neighbour is exterior, reuse the node's own value.
+        T_n = np.where(bn, _shift(T, 0, True),  T)
+        T_s = np.where(bs, _shift(T, 0, False), T)
+        T_w = np.where(bw, _shift(T, 1, True),  T)
+        T_e = np.where(be, _shift(T, 1, False), T)
+        T_avg = 0.25 * (T_n + T_s + T_w + T_e)
+
+        T_new = T.copy()
+        T_new[interior_b] = T_avg[interior_b]
+        T_new[cool_b] = (T_avg[cool_b] + alpha_c * T_cool) / (1.0 + alpha_c)
+        T_new[outer_b] = T_hot
+
+        if tol > 0 and (iters + 1) % check_every == 0:
+            if float(np.abs(T_new - T).max()) < tol:
+                T = T_new
+                converged = True
+                break
+        T = T_new
+
+    return T, iters + 1, converged
+
+
 def warp_blade_thermal(
     hole_cx:   list[float] | None = None,
     hole_cy:   list[float] | None = None,
@@ -229,17 +292,6 @@ def warp_blade_thermal(
         raise ValueError(f"Grid too coarse: nx={nx}, ny={ny}. Minimum 8×4.")
     # ── End validation ───────────────────────────────────────────────────────
 
-    if not _WARP:
-        from simlab.engines.qdgeometry.torch_gpu_physics import gpu_blade_simulation
-        result = gpu_blade_simulation(
-            n_holes=len(hole_cx),
-            hole_positions=list(zip(hole_cx, hole_cy)),
-            hole_radii=hole_r,
-            nx=nx, ny=ny,
-        )
-        result["backend"] = "pytorch_fd_fallback"
-        return result
-
     t0 = time.perf_counter()
     alpha_c = float(h_cool * dx / k_cond)
 
@@ -247,16 +299,48 @@ def warp_blade_thermal(
         ny, nx, hole_cx, hole_cy, hole_r
     )
 
+    # Initial guess: linear gradient T_cool (bottom) → T_hot (top), with the
+    # outer wall pinned to T_hot and the exterior held at coolant temperature.
+    T_init = (np.linspace(T_cool, T_hot, ny, dtype=np.float32)[:, np.newaxis]
+              * np.ones((ny, nx), dtype=np.float32))
+    T_init[outer_np == 1] = float(T_hot)
+    T_init[blade_np == 0] = float(T_cool)
+
+    # ── NumPy fallback when Warp/CUDA is unavailable ─────────────────────────
+    if not _WARP:
+        T_field, iters, converged = _jacobi_numpy(
+            T_init, blade_np, outer_np, cool_np,
+            float(T_hot), float(T_cool), alpha_c, max_iters, tol,
+        )
+        interior_mask = (blade_np == 1) & (outer_np == 0) & (cool_np == 0)
+        if interior_mask.sum() > 0:
+            T_interior = T_field[interior_mask]
+            T_mean = float(T_interior.mean())
+            T_interior_peak = float(T_interior.max())
+        else:
+            T_mean = float(T_field[blade_np == 1].mean()) if blade_np.sum() > 0 else float(T_hot)
+            T_interior_peak = T_mean
+        return {
+            "backend":         "numpy_fd_fallback",
+            "T_field":         T_field.tolist(),
+            "T_mean":          T_mean,
+            "T_interior_peak": T_interior_peak,
+            "T_hot":           float(T_hot),
+            "T_cool":          float(T_cool),
+            "iters":           iters,
+            "converged":       converged,
+            "n_holes":         len(hole_cx),
+            "wall_time_s":     time.perf_counter() - t0,
+            "nx": nx, "ny": ny,
+        }
+
     device = "cuda" if wp.get_device("cuda:0").is_cuda else "cpu"
 
     blade_wp  = wp.array(blade_np.astype(np.int32),  dtype=wp.int32, device=device)
     outer_wp  = wp.array(outer_np.astype(np.int32),  dtype=wp.int32, device=device)
     cool_wp   = wp.array(cool_np.astype(np.int32),   dtype=wp.int32, device=device)
 
-    # Initialise T: linear gradient from T_cool (bottom) to T_hot (top)
-    T_init = np.linspace(T_cool, T_hot, ny, dtype=np.float32)[:, np.newaxis] * np.ones((ny, nx), dtype=np.float32)
-    T_init[outer_np == 1] = float(T_hot)
-    T_init[blade_np == 0] = float(T_cool)  # exterior holds at coolant temp
+    # Initial guess T_init was built above (shared with the NumPy fallback).
     T_a = wp.array(T_init,             dtype=wp.float32, device=device)
     T_b = wp.array(T_init.copy(),      dtype=wp.float32, device=device)
 
